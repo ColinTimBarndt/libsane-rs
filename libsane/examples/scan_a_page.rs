@@ -66,9 +66,11 @@ fn write_pam_image(image: &DecodedImage, path: impl AsRef<std::path::Path>) -> s
     let (depth, pam_tupletype, maxval) = match image.format {
         DecodedImageFormat::BlackAndWhite => (1, "BLACKANDWHITE", 1u32),
         DecodedImageFormat::Gray { bytes_per_pixel } => {
-            (1, "GRAYSCALE", 1 << (bytes_per_pixel * 8))
+            (1, "GRAYSCALE", (1 << (bytes_per_pixel * 8)) - 1)
         }
-        DecodedImageFormat::Rgb { bytes_per_channel } => (3, "RGB", 1 << (bytes_per_channel * 8)),
+        DecodedImageFormat::Rgb { bytes_per_channel } => {
+            (3, "RGB", (1 << (bytes_per_channel * 8)) - 1)
+        }
     };
     write!(
         out_file,
