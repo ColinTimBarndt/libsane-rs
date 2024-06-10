@@ -1,0 +1,13 @@
+[package]
+name = "libsane-sys"
+version = "0.1.0"
+edition = "2021"
+documentation = "https://sane-project.gitlab.io/standard/"
+
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[build-dependencies]
+bindgen = "0.69"
+convert_case = "0.6"

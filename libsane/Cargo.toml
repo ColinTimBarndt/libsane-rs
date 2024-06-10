@@ -1,0 +1,24 @@
+[package]
+name = "libsane"
+version = "0.1.0"
+edition = "2021"
+
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+async = ["tokio", "tokio/net"]
+tokio = ["dep:tokio"]
+parking_lot = ["dep:parking_lot"]
+
+[dependencies]
+libsane-sys = { path = "../libsane-sys", version = "0.1.0" }
+bitflags = "2.5"
+parking_lot = { version = "0.12", optional = true }
+
+[dependencies.tokio]
+optional = true
+version = "1.38"
+default-features = false

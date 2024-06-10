@@ -1,0 +1,8 @@
+[workspace]
+members = ["libsane", "libsane-sys"]
+resolver = "2"
+
+[workspace.package]
+license = "MIT OR Apache-2.0"
+authors = ["Colin Tim Barndt <contact@colintimbarndt.de>"]
+repository = "https://github.com/ColinTimBarndt/libsane-rs/"
