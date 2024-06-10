@@ -30,8 +30,9 @@ fn main() -> Result<(), libsane::Error> {
     let mut reader = device.scan_blocking();
     let mut buf = Vec::new();
 
-    let mut decoder = FrameDecoder::new();
-    decoder.decode_black_and_white_as_bytes(true);
+    let mut decoder = FrameDecoder::builder()
+        .decode_black_and_white_as_bytes(true)
+        .build();
 
     while let Some(mut frame_reader) = reader.next_frame()? {
         buf.clear();
