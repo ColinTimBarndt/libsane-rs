@@ -1,11 +1,18 @@
-use std::{alloc::Layout, mem::MaybeUninit};
+use std::{alloc::Layout, mem::MaybeUninit, ptr::NonNull};
 
 pub(crate) fn new_uninit_boxed_slice<T>(len: usize) -> Box<[MaybeUninit<T>]> {
     if len == 0 {
         return Box::new([]);
     }
+    if std::mem::size_of::<T>() == 0 {
+        let raw =
+            std::ptr::slice_from_raw_parts_mut(NonNull::<MaybeUninit<T>>::dangling().as_ptr(), len);
+        // SAFETY: T is a zero-sized type (ZST) and the pointer is dangling
+        return unsafe { Box::from_raw(raw) };
+    }
+    let layout = Layout::array::<T>(len).unwrap();
+    // SAFETY: array length is non-zero, type is not ZST, memory allocation has correct layout
     unsafe {
-        let layout = Layout::array::<T>(len).unwrap();
         let raw = std::alloc::alloc(layout) as *mut MaybeUninit<T>;
         let raw = std::ptr::slice_from_raw_parts_mut(raw, len);
         Box::from_raw(raw)

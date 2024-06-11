@@ -36,9 +36,6 @@ impl<S: WithSane> ScanReader<S> {
     }
 
     pub fn cancel(&mut self) {
-        if self.done {
-            return;
-        }
         self.device.inner.cancel();
         self.done = true;
     }
@@ -47,18 +44,21 @@ impl<S: WithSane> ScanReader<S> {
         if self.done {
             return Ok(None);
         };
-        let params = self.device.with_sane(|sane| unsafe {
+        let params = self.device.with_sane(|sane| {
             let handle = self.device.inner.handle;
-            sane.sys_start(handle)?;
+            // SAFETY: handle is valid, library call is sequential (have access to Sane struct)
+            unsafe { sane.sys_start(handle)? };
+            // SAFETY: see above, and start has been called
+            let res = unsafe { sane.sys_set_io_mode(handle, IoMode::Blocking) };
             // Blocking is always supported, but the backend might always return an error.
             // This is falsely documented behavior or a wrong backend implementation.
-            let res = sane.sys_set_io_mode(handle, IoMode::Blocking);
             if let Err(err) = res {
                 if err.sys_status() != sys::Status::Unsupported {
                     return Err(err);
                 }
             }
-            sane.sys_get_parameters(handle)
+            // SAFETY: handle is valid, and call is sequential
+            unsafe { sane.sys_get_parameters(handle) }
         })?;
         Ok(Some(FrameReader::new(self, params.into())))
     }
@@ -87,6 +87,7 @@ impl<'a, S: WithSane> FrameReader<'a, S> {
         let last_frame = self.params.last_frame;
         self.scanner.device.with_sane(|sane| {
             self.started = true;
+            // SAFETY: handle is valid, device is scanning, call is sequential
             let res = unsafe { sane.sys_read(self.scanner.device.inner.handle, buf) };
             if let Err(err) = &res {
                 if matches!(err.sys_status(), sys::Status::Cancelled | sys::Status::Eof if last_frame) {
@@ -115,6 +116,7 @@ impl<'a, S: WithSane> FrameReader<'a, S> {
                 buf_vec.reserve_exact(bytes_to_read);
                 let mut buf = &mut buf_vec.spare_capacity_mut()[..bytes_to_read];
                 while !buf.is_empty() {
+                    // SAFETY: handle is valid, device is scanning, call is sequential
                     let res = unsafe { sane.sys_read_uninit(handle, buf) };
                     match res {
                         Err(ref err) if err.sys_status() == sys::Status::Eof => {
@@ -127,7 +129,7 @@ impl<'a, S: WithSane> FrameReader<'a, S> {
                         }
                     };
                 }
-                // buf_vec reserved length was fully initialized
+                // SAFETY: bytes_to_read reserved length was fully initialized
                 unsafe { buf_vec.set_len(buf_vec.len() + bytes_to_read) };
                 Ok(())
             } else {
@@ -141,13 +143,14 @@ impl<'a, S: WithSane> FrameReader<'a, S> {
                     // note that this may be more than reservec_bytes,
                     // we just use all the Vec has given us
                     let buf = buf_vec.spare_capacity_mut();
+                    // SAFETY: handle is valid, device is scanning, call is sequential
                     let res = unsafe { sane.sys_read_uninit(handle, buf) };
                     match res {
                         Err(ref err) if err.sys_status() == sys::Status::Eof => break,
                         Err(err) => return Err(err),
                         Ok(read_len) => {
                             debug_assert_ne!(read_len, 0);
-                            // read_len bytes were initialized
+                            // SAFETY: read_len bytes were initialized
                             unsafe { buf_vec.set_len(buf_vec.len() + read_len) }
                             if read_len < reserved_bytes / 2 {
                                 try_lines /= 2;

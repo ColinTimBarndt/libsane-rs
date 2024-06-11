@@ -32,11 +32,8 @@ impl SaneStr {
     }
 
     pub const fn from_cstr(c: &CStr) -> &Self {
+        // SAFETY: Self is repr(transparent) and inner type is CStr
         unsafe { std::mem::transmute::<&CStr, &Self>(c) }
-    }
-
-    pub fn from_cstr_mut(c: &mut CStr) -> &mut Self {
-        unsafe { std::mem::transmute::<&mut CStr, &mut Self>(c) }
     }
 
     pub fn count_bytes(&self) -> usize {
@@ -60,10 +57,12 @@ impl SaneStr {
     }
 
     pub fn chars(&self) -> Chars {
+        // SAFETY: self is a valid C-String
         unsafe { Chars::new(self.as_ptr()) }
     }
 
     pub fn bytes(&self) -> Bytes {
+        // SAFETY: self is a valid C-String
         unsafe { Bytes::new(self.as_ptr()) }
     }
 }
@@ -130,6 +129,7 @@ impl SaneString {
     pub fn count_bytes(&self) -> usize {
         let mut i = 0;
         loop {
+            // SAFETY: by invariants
             let ch = unsafe { self.0[i].assume_init() };
             if ch == 0 {
                 return i;
@@ -141,6 +141,7 @@ impl SaneString {
     pub fn count_bytes_with_nul(&self) -> usize {
         let mut i = 0;
         loop {
+            // SAFETY: by invariants
             let ch = unsafe { self.0[i].assume_init() };
             i += 1;
             if ch == 0 {
@@ -151,11 +152,13 @@ impl SaneString {
 
     pub fn to_bytes(&self) -> &[u8] {
         let len = self.count_bytes();
+        // SAFETY: by invariants
         unsafe { assume_init_slice(&self.0[..len]) }
     }
 
     pub fn to_bytes_with_nul(&self) -> &[u8] {
         let len = self.count_bytes_with_nul();
+        // SAFETY: by invariants
         unsafe { assume_init_slice(&self.0[..len]) }
     }
 
@@ -172,16 +175,20 @@ impl SaneString {
     }
 
     pub fn chars(&self) -> Chars {
+        // SAFETY: self is a valid C-String (by invariants)
         unsafe { Chars::new(self.as_ptr()) }
     }
 
     pub fn bytes(&self) -> Bytes {
+        // SAFETY: self is a valid C-String (by invariants)
         unsafe { Bytes::new(self.as_ptr()) }
     }
 }
 
 impl AsRef<CStr> for SaneString {
     fn as_ref(&self) -> &CStr {
+        // SAFETY: self is a valid C-String (by invariants)
+        // and is immutably borrowed with same lifetime as self
         unsafe { CStr::from_ptr(self.as_ptr()) }
     }
 }
@@ -197,7 +204,7 @@ impl<'a> IntoIterator for &'a SaneString {
     type Item = char;
 
     fn into_iter(self) -> Self::IntoIter {
-        unsafe { Chars::new(self.as_ptr()) }
+        self.chars()
     }
 }
 
@@ -252,6 +259,8 @@ pub struct Bytes<'a> {
 }
 
 impl<'a> Bytes<'a> {
+    /// # Safety
+    /// Pointer must be a valid C-String with NUL termination.
     const unsafe fn new(data: *const c_char) -> Self {
         Self {
             data,
@@ -264,10 +273,12 @@ impl Iterator for Bytes<'_> {
     type Item = c_char;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // SAFETY: all data is initialized until the NUL terminator
         let ch = unsafe { *self.data };
         if ch == 0 {
             None
         } else {
+            // SAFETY: NUL terminator was not hit => next byte is valid as well
             self.data = unsafe { self.data.add(1) };
             Some(ch)
         }
@@ -283,6 +294,8 @@ pub struct Chars<'a> {
 }
 
 impl<'a> Chars<'a> {
+    /// # Safety
+    /// Pointer must be a valid C-String with NUL termination.
     const unsafe fn new(data: *const c_char) -> Self {
         Self {
             data,
@@ -295,12 +308,14 @@ impl Iterator for Chars<'_> {
     type Item = char;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // SAFETY: all data is initialized until the NUL terminator
         let ch = unsafe { *self.data };
         if ch == 0 {
             None
         } else {
+            // SAFETY: NUL terminator was not hit => next byte is valid as well
             self.data = unsafe { self.data.add(1) };
-            // Latin-1 is a subset of UTF-8
+            // SAFETY: Latin-1 is a subset of UTF-8
             Some(unsafe { char::from_u32_unchecked(ch as u32) })
         }
     }

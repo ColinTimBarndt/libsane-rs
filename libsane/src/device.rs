@@ -4,7 +4,7 @@ pub mod scan;
 
 use core::ffi::c_void;
 use core::ptr::NonNull;
-use std::{mem::ManuallyDrop, ptr::addr_of_mut};
+use std::mem::ManuallyDrop;
 
 use bitflags::bitflags;
 
@@ -20,30 +20,36 @@ pub(crate) struct RawDeviceHandle<S: WithSane> {
 impl<S: WithSane> RawDeviceHandle<S> {
     pub fn map_sane<N: WithSane>(self, map_fn: impl FnOnce(S) -> N) -> RawDeviceHandle<N> {
         let handle = self.handle;
+        // Prevents the device from being closed.
         let mut this = ManuallyDrop::new(self);
 
         RawDeviceHandle {
             handle,
-            sane: map_fn(unsafe { addr_of_mut!(this.sane).read() }),
+            // SAFETY: This copies the value, but the original is ManuallyDrop and never accessed again.
+            sane: map_fn(unsafe { (&mut this.sane as *mut S).read() }),
         }
     }
 
     pub(crate) fn get_option(&self, index: u32) -> Option<options::DeviceOption<S>> {
         let descriptor =
+            // SAFETY: call is synchronized and device is not closed.
             self.with_sane(|sane| unsafe { sane.sys_get_option_descriptor(self.handle, index) });
         if descriptor.is_null() {
             None
         } else {
+            // SAFETY: device option was obtained from the C library, thus valid by the specification.
             Some(unsafe { options::DeviceOption::new(self, descriptor, index) })
         }
     }
 
     pub fn get_parameters(&self) -> Result<scan::FrameParameters, Error> {
+        // SAFETY: call is synchronized and device is not closed.
         self.with_sane(|sane| unsafe { sane.sys_get_parameters(self.handle) })
             .map(scan::FrameParameters::from)
     }
 
     pub fn cancel(&self) {
+        // SAFETY: The handle is valid, no synchronization needed by specification.
         unsafe { Sane::<()>::sys_cancel(self.handle) }
     }
 }
@@ -56,9 +62,9 @@ unsafe impl<S: WithSane> Sync for RawDeviceHandle<S> where S: Sync {}
 
 impl<S: WithSane> Drop for RawDeviceHandle<S> {
     fn drop(&mut self) {
-        unsafe {
-            self.sane.with_sane(|sane| sane.sys_close(self.handle));
-        }
+        self.sane
+            // SAFETY: This handle is dropped, which means that nothing else is referencing any resource to this handle.
+            .with_sane(|sane| unsafe { sane.sys_close(self.handle) });
     }
 }
 
@@ -102,6 +108,7 @@ impl<A> Sane<A> {
         with: S,
         devicename: &(impl AsRef<SaneStr> + ?Sized),
     ) -> Result<DeviceHandle<S>, Error> {
+        // SAFETY: call is synchronized.
         let handle = with.with_sane(|sane| unsafe { sane.sys_open(devicename.as_ref()) })?;
 
         Ok(DeviceHandle {

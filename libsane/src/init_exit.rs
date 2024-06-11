@@ -7,7 +7,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use crate::{error, sys, Error, Sane, SaneStr, Version};
+use crate::{error, slice_util::slice_as_maybe_uninit, sys, Error, Sane, SaneStr, Version};
 
 static HAS_INSTANCE: AtomicBool = AtomicBool::new(false);
 static STATIC_SYNC_DATA: StaticSyncData = StaticSyncData {
@@ -85,8 +85,7 @@ impl Authorizer<'_> {
         if bytes.len() > target.len() {
             return Err(AuthFieldError::TooLong);
         }
-        target[..bytes.len()]
-            .copy_from_slice(unsafe { std::mem::transmute::<&[u8], &[MaybeUninit<u8>]>(bytes) });
+        target[..bytes.len()].copy_from_slice(slice_as_maybe_uninit(bytes));
         Ok(())
     }
 }
@@ -151,6 +150,9 @@ where
 
 impl<A> Drop for Sane<A> {
     fn drop(&mut self) {
+        // SAFETY: All calls and data reads happen with a reference to Sane. Therefore,
+        // there are no more references and no more api calls will happen after this.
+        // (unless Sane is initialized again, which is okay by spec)
         unsafe { sys::sane_exit() };
         HAS_INSTANCE.store(false, Ordering::Release);
     }
@@ -175,6 +177,7 @@ impl<A> Sane<A> {
         }
 
         let mut version = Version::new(0, 0, 0);
+        // SAFETY: There is no other instance of Sane, therefore libsane can be initialized.
         let result = error::status_result(unsafe {
             sys::sane_init(version.as_mut(), Some(authorize_callback))
         })
@@ -188,6 +191,8 @@ impl<A> Sane<A> {
         });
 
         if result.is_err() {
+            // SAFETY: HAS_INSTANCE is still locked, therefore no other access possible except here as the
+            // authorize_callback may only be called when sane is initalized.
             let ah = unsafe { &mut *STATIC_SYNC_DATA.auth_handler.get() };
             *ah = None;
             HAS_INSTANCE.store(false, Ordering::Release);
@@ -206,6 +211,8 @@ unsafe extern "C" fn authorize_callback(
     //         Will be called from the same thread where init was called if
     //         A is !Send (as Sane is !Send in this case)
     let Some(cb) = (unsafe { &mut *STATIC_SYNC_DATA.auth_handler.get() }) else {
+        // SAFETY: Both are valid uninitialized allocations for C-Strings.
+        // also this code should be unreachable anyways because this callback is only called when auth_handler was provided.
         unsafe {
             username.write(0);
             password.write(0);

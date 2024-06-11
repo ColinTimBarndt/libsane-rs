@@ -21,6 +21,7 @@ impl Error {
     }
 
     pub fn message(&self) -> String {
+        // SAFETY: strstatus returns a valid C-String that is not null.
         let msg = unsafe { CStr::from_ptr(sys::sane_strstatus(self.status)) };
         msg.to_string_lossy().into_owned()
     }

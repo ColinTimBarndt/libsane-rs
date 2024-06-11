@@ -4,7 +4,7 @@ use std::ffi::c_void;
 use bitflags::bitflags;
 
 use crate::{
-    list::{ListIter, SaneStrListIter},
+    list::{new_word_list, SaneStrListIter},
     sys, ControlInfo, DeviceHandle, Error, Fixed, OwnedValue, SaneStr, SaneString, Value,
     ValueType, WithSane,
 };
@@ -33,16 +33,19 @@ impl<'a, S: WithSane> DeviceOption<'a, S> {
 
     pub fn name(&self) -> &SaneStr {
         self.raw
+            // SAFETY: reading is synchronized, and the device has not been closed. By spec, this is a valid C-String.
             .with_sane(|_| unsafe { SaneStr::from_ptr((*self.descriptor).name) })
     }
 
     pub fn title(&self) -> &SaneStr {
         self.raw
+            // SAFETY: reading is synchronized, and the device has not been closed. By spec, this is a valid C-String.
             .with_sane(|_| unsafe { SaneStr::from_ptr((*self.descriptor).name) })
     }
 
     pub fn description(&self) -> &SaneStr {
         self.raw
+            // SAFETY: reading is synchronized, and the device has not been closed. By spec, this is a valid C-String.
             .with_sane(|_| unsafe { SaneStr::from_ptr((*self.descriptor).desc) })
     }
 
@@ -51,31 +54,38 @@ impl<'a, S: WithSane> DeviceOption<'a, S> {
     }
 
     pub fn sys_type(&self) -> sys::ValueType {
+        // SAFETY: reading is synchronized, and the device has not been closed.
         self.raw.with_sane(|_| unsafe { (*self.descriptor).type_ })
     }
 
     pub fn unit(&self) -> sys::Unit {
+        // SAFETY: reading is synchronized, and the device has not been closed.
         self.raw.with_sane(|_| unsafe { (*self.descriptor).unit })
     }
 
     pub fn size(&self) -> usize {
         self.raw
+            // SAFETY: reading is synchronized, and the device has not been closed.
             .with_sane(|_| unsafe { (*self.descriptor).size as usize })
     }
 
     pub fn capabilities(&self) -> DeviceOptionCapabilities {
         self.raw.with_sane(|_| {
+            // SAFETY: reading is synchronized, and the device has not been closed.
             DeviceOptionCapabilities::from_bits_retain(unsafe { (*self.descriptor).cap } as u32)
         })
     }
 
     pub fn constraint(&self) -> Option<DeviceOptionConstraint> {
         self.raw.with_sane(|_| {
+            // SAFETY: reading is synchronized, and the device has not been closed.
             let ctype = unsafe { (*self.descriptor).constraint_type };
+            // SAFETY: reading is synchronized, and the device has not been closed.
             let value_type = unsafe { (*self.descriptor).type_ };
             match ctype {
                 sys::ConstraintType::None => None,
                 sys::ConstraintType::Range => Some({
+                    // SAFETY: By the spec, the union has a value of range
                     let r = unsafe { &*(*self.descriptor).constraint.range };
                     match value_type {
                         sys::ValueType::Int => DeviceOptionConstraint::RangeInt {
@@ -95,14 +105,19 @@ impl<'a, S: WithSane> DeviceOption<'a, S> {
                     }
                 }),
                 sys::ConstraintType::WordList => Some({
+                    // SAFETY: By the spec, the union has a value of word_list
                     let data = unsafe { (*self.descriptor).constraint.word_list };
                     match value_type {
                         sys::ValueType::Int => {
-                            DeviceOptionConstraint::ListInt(unsafe { ListIter::new(data) })
+                            DeviceOptionConstraint::ListInt(
+                                // SAFETY: by spec https://sane-project.gitlab.io/standard/api.html#option-value-constraints
+                                unsafe { new_word_list::<i32>(data) },
+                            )
                         }
-                        sys::ValueType::Fixed => DeviceOptionConstraint::ListFixed(unsafe {
-                            ListIter::new(data as *const Fixed)
-                        }),
+                        sys::ValueType::Fixed => DeviceOptionConstraint::ListFixed(
+                            // SAFETY: by spec https://sane-project.gitlab.io/standard/api.html#option-value-constraints
+                            unsafe { new_word_list::<Fixed>(data) },
+                        ),
                         other => DeviceOptionConstraint::Unsupported {
                             value_type: other,
                             contraint_type: sys::ConstraintType::WordList,
@@ -110,8 +125,13 @@ impl<'a, S: WithSane> DeviceOption<'a, S> {
                     }
                 }),
                 sys::ConstraintType::StringList => Some({
+                    // SAFETY: By the spec, the union has a value of string_list
                     let data = unsafe { (*self.descriptor).constraint.string_list };
-                    DeviceOptionConstraint::ListString(unsafe { SaneStrListIter::new(data) })
+                    DeviceOptionConstraint::ListString(
+                        // SAFETY: by spec, this is a null-terminated pointer list
+                        // https://sane-project.gitlab.io/standard/api.html#option-value-constraints
+                        unsafe { SaneStrListIter::new(data) },
+                    )
                 }),
                 other => Some(DeviceOptionConstraint::Unsupported {
                     value_type,
@@ -123,10 +143,12 @@ impl<'a, S: WithSane> DeviceOption<'a, S> {
 
     pub fn get(&mut self) -> Result<Option<OwnedValue>, Error> {
         self.raw.with_sane(|sane| {
+            // SAFETY: reading is synchronized, and the device has not been closed.
             let ty = ValueType::from(unsafe { (*self.descriptor).type_ });
 
             if ty.is_word_sized() {
                 let mut val: sys::Word = 0;
+                // SAFETY: Device is not closed, call is synchronized.
                 unsafe {
                     sane.sys_get_option_value(
                         self.raw.handle,
@@ -137,6 +159,7 @@ impl<'a, S: WithSane> DeviceOption<'a, S> {
                 Ok(OwnedValue::from_word(val, ty))
             } else if ty == ValueType::String {
                 let mut strbuf = SaneString::with_capacity(self.size());
+                // SAFETY: Device is not closed, call is synchronized, strbuf has required capacity.
                 unsafe {
                     sane.sys_get_option_value(
                         self.raw.handle,
@@ -153,6 +176,7 @@ impl<'a, S: WithSane> DeviceOption<'a, S> {
 
     pub fn set(&mut self, value: Value) -> Result<(ControlInfo, OwnedValue), Error> {
         self.raw.with_sane(|sane| {
+            // SAFETY: Device is not closed, read is synchronized.
             let ty = ValueType::from(unsafe { (*self.descriptor).type_ });
             assert_eq!(
                 value.type_of(),
@@ -161,6 +185,7 @@ impl<'a, S: WithSane> DeviceOption<'a, S> {
             );
 
             if let Some(mut val) = value.to_word() {
+                // SAFETY: Device is not closed, call is synchronized.
                 let info = unsafe {
                     sane.sys_set_option_value(
                         self.raw.handle,
@@ -174,6 +199,7 @@ impl<'a, S: WithSane> DeviceOption<'a, S> {
                 // but this is to be safe.
                 let mut strbuf = SaneString::with_capacity(self.size());
                 strbuf.set_contents(s);
+                // SAFETY: Device is not closed, call is synchronized.
                 let info = unsafe {
                     sane.sys_set_option_value(
                         self.raw.handle,
@@ -190,6 +216,7 @@ impl<'a, S: WithSane> DeviceOption<'a, S> {
 
     pub fn set_auto(&self) -> Result<(), Error> {
         self.raw
+            // SAFETY: Device is not closed, call is synchronized.
             .with_sane(|sane| unsafe { sane.sys_set_option_auto(self.raw.handle, self.index) })
     }
 }
@@ -235,8 +262,8 @@ pub enum DeviceOptionConstraint<'a> {
         max: Fixed,
         quant: Fixed,
     },
-    ListInt(ListIter<'a, i32>),
-    ListFixed(ListIter<'a, Fixed>),
+    ListInt(&'a [i32]),
+    ListFixed(&'a [Fixed]),
     ListString(SaneStrListIter<'a>),
     Unsupported {
         value_type: sys::ValueType,

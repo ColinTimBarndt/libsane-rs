@@ -80,12 +80,14 @@ impl Version {
 
 impl AsRef<sys::Int> for Version {
     fn as_ref(&self) -> &sys::Int {
+        // SAFETY: Self is repr(transparent) and inner type is sys::Int
         unsafe { &*(self as *const Self as *const sys::Int) }
     }
 }
 
 impl AsMut<sys::Int> for Version {
     fn as_mut(&mut self) -> &mut sys::Int {
+        // SAFETY: Self is repr(transparent) and inner type is sys::Int
         unsafe { &mut *(self as *mut Self as *mut sys::Int) }
     }
 }
@@ -94,6 +96,7 @@ impl AsMut<sys::Int> for Version {
 pub trait WithSane {
     type Auth;
 
+    /// Grants access to the Sane struct, which also guarantees that no other thread has acces to it.
     fn with_sane<R>(&self, cb: impl for<'a> FnOnce(&'a Sane<Self::Auth>) -> R) -> R;
 }
 

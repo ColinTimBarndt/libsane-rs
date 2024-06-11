@@ -5,6 +5,11 @@ use crate::{slice_util::boxed_slice_from_fn, sys, Error, Sane, SaneStr};
 
 #[derive(Clone)]
 pub struct DeviceDescription {
+    /// This buffer contains four C-Strings:
+    /// - 0..name_end: name
+    /// - name_end..vendor_end: vendor
+    /// - vendor_end..model_end: model
+    /// - model_end..END: type
     buf: Vec<u8>,
     name_end: usize,
     vendor_end: usize,
@@ -13,25 +18,33 @@ pub struct DeviceDescription {
 
 impl DeviceDescription {
     pub fn name(&self) -> &SaneStr {
+        // SAFETY: first C-String in buf
         unsafe { SaneStr::new_unchecked(&self.buf[..self.name_end]) }
     }
 
     pub fn vendor(&self) -> &SaneStr {
+        // SAFETY: second C-String in buf
         unsafe { SaneStr::new_unchecked(&self.buf[self.name_end..self.vendor_end]) }
     }
 
     pub fn model(&self) -> &SaneStr {
+        // SAFETY: third C-String in buf
         unsafe { SaneStr::new_unchecked(&self.buf[self.vendor_end..self.model_end]) }
     }
 
     pub fn type_(&self) -> &SaneStr {
+        // SAFETY: fourth C-String in buf
         unsafe { SaneStr::new_unchecked(&self.buf[self.model_end..]) }
     }
 
     fn from_sys_into(into: &mut Self, value: &sys::Device) {
+        // SAFETY: by spec, this is a C-String,
         let name = unsafe { SaneStr::from_ptr(value.name) }.to_bytes_with_nul();
+        // SAFETY: by spec, this is a C-String,
         let vendor = unsafe { SaneStr::from_ptr(value.vendor) }.to_bytes_with_nul();
+        // SAFETY: by spec, this is a C-String,
         let model = unsafe { SaneStr::from_ptr(value.model) }.to_bytes_with_nul();
+        // SAFETY: by spec, this is a C-String,
         let type_ = unsafe { SaneStr::from_ptr(value.type_) }.to_bytes_with_nul();
 
         into.name_end = name.len();
@@ -101,6 +114,7 @@ impl DeviceDescriptionIter<'_> {
     pub fn len(&self) -> usize {
         let mut count = 0;
         let mut ptr = self.data;
+        // SAFETY: until the NULL terminator, this is part of the list.
         while !unsafe { ptr.as_ref() }.is_null() {
             count += 1;
             // SAFETY: null-termination implies this memory being valid
@@ -110,12 +124,15 @@ impl DeviceDescriptionIter<'_> {
     }
 
     pub fn is_empty(&self) -> bool {
+        // SAFETY: the iterator does not go past the NULL terminator, therefore self.data is part of the list.
         unsafe { self.data.as_ref() }.is_null()
     }
 
     /// Advances the iterator and gets the next item as a the reference provided by [`sys_get_devices`][`libsane_sys::sane_get_devices`].
     pub fn next_sys(&mut self) -> Option<&sys::Device> {
+        // SAFETY: until the NULL terminator, this is part of the list.
         let item = unsafe { self.data.as_ref().as_ref() }?;
+        // SAFETY: no NULL read, therefore the next item is part of the list as well.
         self.data = unsafe { self.data.add(1) };
         Some(item)
     }
@@ -151,6 +168,7 @@ impl<A> Sane<A> {
         // call to sys::sane_get_devices.
         extract: impl for<'a> FnOnce(DeviceDescriptionIter<'a>) -> R,
     ) -> Result<R, Error> {
+        // SAFETY: By specification, get_devices returns a NULL-terminated list of device descriptions.
         let device_list = unsafe { DeviceDescriptionIter::new(self.sys_get_devices(local_only)?) };
         Ok(extract(device_list))
     }
