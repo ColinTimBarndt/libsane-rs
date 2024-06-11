@@ -4,18 +4,17 @@ use std::marker::PhantomData;
 use crate::{sys, SaneStr};
 
 /// # Safety
-/// - `T` must have the same size as `i32` and at most the same alignment.
-/// - `data` must have at least the same alignment as `i32`.
-/// - `data` must point to a `i32` length and the next length values must be valid `T`s.
-pub(crate) unsafe fn new_word_list<'a, T>(data: *const i32) -> &'a [T] {
-    debug_assert_eq!(std::mem::size_of::<T>(), 4);
-    debug_assert!(std::mem::align_of::<T>() <= 4);
+/// - `T` must have the same size as `sys::Int` and at most the same alignment.
+/// - `data` must have at least the same alignment as `sys::Int`.
+/// - `data` must point to a `sys::Int` length and the next length values must be valid `T`s.
+pub(crate) unsafe fn new_word_list<'a, T>(data: *const sys::Int) -> &'a [T] {
+    debug_assert_eq!(std::mem::size_of::<T>(), std::mem::size_of::<sys::Int>());
+    debug_assert!(std::mem::align_of::<T>() <= std::mem::align_of::<sys::Int>());
     debug_assert!(data.is_aligned());
-    debug_assert!((data as *const T).is_aligned());
     debug_assert!(*data >= 0);
-    // SAFETY: data is a valid `u32` representing the size
+    // SAFETY: data is a valid `sys::Int` representing the size
     let len = *data as usize;
-    // SAFETY: the next len values are `T`s layout-compatible with `u32`
+    // SAFETY: the next len values are `T`s layout-compatible with `sys::Int`
     let data = data.add(1) as *const T;
     std::slice::from_raw_parts(data, len)
 }

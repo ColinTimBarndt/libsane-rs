@@ -111,7 +111,7 @@ impl<'a, S: WithSane> DeviceOption<'a, S> {
                         sys::ValueType::Int => {
                             DeviceOptionConstraint::ListInt(
                                 // SAFETY: by spec https://sane-project.gitlab.io/standard/api.html#option-value-constraints
-                                unsafe { new_word_list::<i32>(data) },
+                                unsafe { new_word_list::<sys::Int>(data) },
                             )
                         }
                         sys::ValueType::Fixed => DeviceOptionConstraint::ListFixed(
@@ -262,7 +262,7 @@ pub enum DeviceOptionConstraint<'a> {
         max: Fixed,
         quant: Fixed,
     },
-    ListInt(&'a [i32]),
+    ListInt(&'a [sys::Int]),
     ListFixed(&'a [Fixed]),
     ListString(SaneStrListIter<'a>),
     Unsupported {
